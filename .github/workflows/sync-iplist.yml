@@ -1,53 +1,60 @@
-# .github/workflows/sync-iplist.yml  ── copy / paste
+# .github/workflows/sync-iplist.yml
 name: Sync Cloudflare IP-List to gist
+
 on:
-  schedule: [ { cron: "*/5 * * * *" } ]      # every 5 min
-  workflow_dispatch:
+  schedule:
+    - cron: "*/5 * * * *"          # every 5 minutes
+  workflow_dispatch:               # manual “Run workflow” button
 
 env:
-  CF_ACCOUNT:  ${{ secrets.CF_ACCOUNT_ID }}  # set in repo › Settings › Secrets
-  CF_LIST:     ${{ secrets.CF_LIST_ID }}
-  CF_TOKEN:    ${{ secrets.CF_TOKEN }}
+  # -------- Cloudflare secrets (set these in repo → Settings → Secrets → Actions) --------
+  CF_ACCOUNT:  ${{ secrets.CF_ACCOUNT_ID }}   # f6e6af67d15c7c6b986452964bf75e79
+  CF_LIST:     ${{ secrets.CF_LIST_ID }}      # b9c166bd599645d0a373114d3d2c9d80
+  CF_TOKEN:    ${{ secrets.CF_TOKEN }}        # API-token with “Account → Filter Lists → Read”
 
-  GIST_ID:     YOUR_32_CHAR_GIST_ID          # paste from gist URL
-  GIST_FILE:   ips.txt                       # file inside the gist
-  GIST_TOKEN:  ${{ secrets.GIST_TOKEN }}     # PAT made in SAME account as gist
+  # -------- GitHub Gist details --------
+  GIST_ID:     eb732092f58eaeb1291e2acf0b1317f1                   # 32-char ID from the gist URL
+  GIST_FILE:   ips.txt                        # filename inside the gist
+  GIST_TOKEN:  ${{ secrets.GIST_TOKEN }}      # PAT created in SAME GitHub account, scope “Gists: r/w”
 
 jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
-    - name: Fetch list from Cloudflare
-      id: pull
-      run: |
-        set -e
-        echo "▶ Calling Cloudflare list API"
-        RESP=$(curl -s -H "Authorization: Bearer $CF_TOKEN" \
-          "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/rules/lists/$CF_LIST/items")
-        echo "$RESP" | jq -e '.success == true' >/dev/null || {
-          echo "::error ::Cloudflare API call failed → check Account-ID, List-ID, or Token"
-          echo "$RESP"
-          exit 1
-        }
-        echo "$RESP" | jq -r '.result[].value' | sort -u > list.txt
-        if [ ! -s list.txt ]; then
-          echo "::warning ::Cloudflare list is empty – skipping gist update"
-          exit 0        # do NOT wipe the gist
-        fi
-        echo "✓ Pulled $(wc -l < list.txt) items"
+      # 1 ▸ Pull the IPs from Cloudflare
+      - name: Fetch list
+        id: cf
+        run: |
+          set -e
+          uri="https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/rules/lists/$CF_LIST/items"
+          resp=$(curl -sS -H "Authorization: Bearer $CF_TOKEN" "$uri")
+          echo "$resp" | jq -e '.success == true' > /dev/null || {
+            echo "::error ::Cloudflare API call failed → check Account-ID, List-ID, CF_TOKEN scope"
+            echo "$resp"
+            exit 1
+          }
+          echo "$resp" | jq -r '.result[].ip' | sort -u > list.txt
+          if [ ! -s list.txt ]; then
+            echo "::warning ::Cloudflare list empty – skipping gist update"
+            exit 0
+          fi
+          echo "Fetched $(wc -l < list.txt) IP(s) from Cloudflare"
 
-    - name: Update / create ips.txt in the gist
-      run: |
-        jq -n --arg f "$GIST_FILE" --arg c "$(tr '\n' '\\n' < list.txt)" \
-          '{files:{($f):{content:$c}}}' > body.json
-        echo "▶ PATCH /gists/$GIST_ID"
-        HTTP=$(curl -s -o /tmp/resp.json -w "%{http_code}" -XPATCH \
-          -H "Authorization: token $GIST_TOKEN" \
-          -H "Content-Type: application/json" \
-          -d @body.json "https://api.github.com/gists/$GIST_ID")
-        if [ "$HTTP" != "200" ]; then
-          echo "::error ::GitHub returned $HTTP – wrong GIST_ID or PAT not authorised"
-          cat /tmp/resp.json
-          exit 1
-        fi
-        echo "✓ Gist updated"
+      # 2 ▸ Update ips.txt in the gist
+      - name: Update gist
+        run: |
+          jq -n \
+            --arg f "$GIST_FILE" \
+            --arg c "$(tr '\n' '\\n' < list.txt)" \
+            '{files:{($f):{content:$c}}}' > body.json
+          http=$(curl -sS -o /tmp/resp.json -w "%{http_code}" -XPATCH \
+                 -H "Authorization: token $GIST_TOKEN" \
+                 -H "Content-Type: application/json" \
+                 -d @body.json \
+                 "https://api.github.com/gists/$GIST_ID")
+          if [ "$http" != "200" ]; then
+            echo "::error ::GitHub returned $http – confirm GIST_ID and that GIST_TOKEN belongs to the gist owner"
+            cat /tmp/resp.json
+            exit 1
+          fi
+          echo "Gist updated successfully"
