@@ -13,7 +13,7 @@ env:
   CF_TOKEN:    ${{ secrets.CF_TOKEN }}        # API-token with “Account → Filter Lists → Read”
 
   # ------- GitHub Gist details -------
-  GIST_ID:     YOUR_GIST_ID                   # 32-char ID from the gist URL
+  GIST_ID:     eb732092f58eaeb1291e2acf0b1317f1                   # 32-char ID from the gist URL
   GIST_FILE:   ips.txt                        # filename inside the gist
   GIST_TOKEN:  ${{ secrets.GIST_TOKEN }}      # PAT created in SAME GitHub account, scope “Gists: r/w”
 
