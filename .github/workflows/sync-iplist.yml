@@ -3,17 +3,17 @@ name: Sync Cloudflare IP-List to gist
 
 on:
   schedule:
-    - cron: "*/5 * * * *"          # every 5 minutes
-  workflow_dispatch:               # manual “Run workflow” button
+    - cron: "*/5 * * * *"        # every 5 minutes
+  workflow_dispatch:             # manual “Run workflow” button
 
 env:
-  # -------- Cloudflare secrets (set these in repo → Settings → Secrets → Actions) --------
-  CF_ACCOUNT:  ${{ secrets.CF_ACCOUNT_ID }}   # f6e6af67d15c7c6b986452964bf75e79
-  CF_LIST:     ${{ secrets.CF_LIST_ID }}      # b9c166bd599645d0a373114d3d2c9d80
+  # ------- Cloudflare secrets (set these in repo → Settings → Secrets → Actions) -------
+  CF_ACCOUNT:  ${{ secrets.CF_ACCOUNT_ID }}   # e.g. f6e6af67d15c7c6b986452964bf75e79
+  CF_LIST:     ${{ secrets.CF_LIST_ID }}      # e.g. b9c166bd599645d0a373114d3d2c9d80
   CF_TOKEN:    ${{ secrets.CF_TOKEN }}        # API-token with “Account → Filter Lists → Read”
 
-  # -------- GitHub Gist details --------
-  GIST_ID:     eb732092f58eaeb1291e2acf0b1317f1                   # 32-char ID from the gist URL
+  # ------- GitHub Gist details -------
+  GIST_ID:     YOUR_GIST_ID                   # 32-char ID from the gist URL
   GIST_FILE:   ips.txt                        # filename inside the gist
   GIST_TOKEN:  ${{ secrets.GIST_TOKEN }}      # PAT created in SAME GitHub account, scope “Gists: r/w”
 
@@ -21,40 +21,46 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
-      # 1 ▸ Pull the IPs from Cloudflare
+      # 1 ▸ pull the IPs from Cloudflare
       - name: Fetch list
         id: cf
         run: |
           set -e
           uri="https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/rules/lists/$CF_LIST/items"
           resp=$(curl -sS -H "Authorization: Bearer $CF_TOKEN" "$uri")
+
+          # confirm Cloudflare answered OK
           echo "$resp" | jq -e '.success == true' > /dev/null || {
-            echo "::error ::Cloudflare API call failed → check Account-ID, List-ID, CF_TOKEN scope"
+            echo "::error ::Cloudflare API call failed → check Account-ID, List-ID or CF_TOKEN scope"
             echo "$resp"
             exit 1
           }
+
+          # write each IP on its own line
           echo "$resp" | jq -r '.result[].ip' | sort -u > list.txt
+
+          # avoid wiping the gist if list is (temporarily) empty
           if [ ! -s list.txt ]; then
             echo "::warning ::Cloudflare list empty – skipping gist update"
             exit 0
           fi
-          echo "Fetched $(wc -l < list.txt) IP(s) from Cloudflare"
 
-      # 2 ▸ Update ips.txt in the gist
+      # 2 ▸ update ips.txt in the gist (preserving real newlines)
       - name: Update gist
         run: |
-          jq -n \
-            --arg f "$GIST_FILE" \
-            --arg c "$(tr '\n' '\\n' < list.txt)" \
+          jq -n --arg f "$GIST_FILE" --rawfile c list.txt \
             '{files:{($f):{content:$c}}}' > body.json
+
           http=$(curl -sS -o /tmp/resp.json -w "%{http_code}" -XPATCH \
                  -H "Authorization: token $GIST_TOKEN" \
                  -H "Content-Type: application/json" \
                  -d @body.json \
                  "https://api.github.com/gists/$GIST_ID")
+
           if [ "$http" != "200" ]; then
             echo "::error ::GitHub returned $http – confirm GIST_ID and that GIST_TOKEN belongs to the gist owner"
             cat /tmp/resp.json
             exit 1
           fi
-          echo "Gist updated successfully"
+
+          echo "✓ Gist updated with $(wc -l < list.txt) IP(s)"
