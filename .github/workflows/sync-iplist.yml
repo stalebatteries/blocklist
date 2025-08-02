@@ -2,34 +2,46 @@ name: Sync Cloudflare IP-List to gist
 
 on:
   schedule:
-    - cron: "*/5 * * * *"      # every 5 minutes
-  workflow_dispatch:           # manual run button
+    - cron:  "*/5 * * * *"        # every 5 minutes
+  workflow_dispatch:              # manual run button in Actions tab
 
 env:
-  CF_ACCOUNT: ${{ secrets.CF_ACCOUNT_ID }}
-  CF_LIST:    ${{ secrets.CF_LIST_ID }}
-  CF_TOKEN:   ${{ secrets.CF_TOKEN }}
-  GIST_ID:    d01cec2c0d4fe6e8e203d9ca9723b69c   # ← replace with *your* gist ID
-  GIST_FILE:  ips.txt
-  GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
+  CF_ACCOUNT:  ${{ secrets.CF_ACCOUNT_ID }}
+  CF_LIST:     ${{ secrets.CF_LIST_ID }}
+  CF_TOKEN:    ${{ secrets.CF_TOKEN }}
+
+  GIST_ID:     d01cec2c0d4fe6e8e203d9ca9723b69c   # ← replace with *your* gist ID
+  GIST_FILE:   ips.txt
+  GIST_TOKEN:  ${{ secrets.GIST_TOKEN }}
 
 jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
-      # 1 ▸ pull the IPs from Cloudflare
-      - name: Fetch list
-        run: |
-          curl -sS -H "Authorization: Bearer $CF_TOKEN" \
-            "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/rules/lists/$CF_LIST/items" \
-            | jq -r '.result[].ip' | sort -u > list.txt
 
-      # 2 ▸ push them into the gist
-      - name: Update gist
-        run: |
-          jq -n --arg f "$GIST_FILE" --arg c "$(tr '\n' '\\n' < list.txt)" \
-            '{files:{($f):{content:$c}}}' > body.json
-          curl -sS -XPATCH \
-               -H "Authorization: token $GIST_TOKEN" \
-               -H "Content-Type: application/json" \
-               -d @body.json https://api.github.com/gists/$GIST_ID
+    # 1 ▸ pull the IPs from the Cloudflare list
+    - name: Fetch list
+      run: |
+        curl -sS -H "Authorization: Bearer $CF_TOKEN" \
+             "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/rules/lists/$CF_LIST/items" \
+          | jq -r '.result[].value' | sort -u > list.txt
+
+        # ─── Abort if the file is empty (protects against accidental wipes) ───
+        if [ ! -s list.txt ]; then
+          echo "Cloudflare list empty – skipping gist update"
+          exit 0
+        fi
+
+    # 2 ▸ push the list into the gist
+    - name: Update gist
+      run: |
+        jq -n \
+          --arg f "$GIST_FILE" \
+          --arg c "$(tr '\n' '\\n' < list.txt)" \
+          '{files:{($f):{content:$c}}}' > body.json
+
+        curl -sS -XPATCH \
+             -H "Authorization: token $GIST_TOKEN" \
+             -H "Content-Type: application/json" \
+             -d @body.json \
+             "https://api.github.com/gists/$GIST_ID"
