@@ -3,7 +3,7 @@ name: Sync Cloudflare IP-List to gist
 
 on:
   schedule:
-    - cron: "*/5 * * * *"        # every 5 minutes
+    - cron: "*/7 * * * *"        # every 5 minutes
   workflow_dispatch:             # manual “Run workflow” button
 
 env:
