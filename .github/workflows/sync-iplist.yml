@@ -1,46 +1,53 @@
-# .github/workflows/sync-iplist.yml
+# .github/workflows/sync-iplist.yml  ── copy / paste
 name: Sync Cloudflare IP-List to gist
 on:
-  schedule:
-    - cron: "*/5 * * * *"          # run every 5 minutes
-  workflow_dispatch:               # adds the “Run workflow” button
+  schedule: [ { cron: "*/5 * * * *" } ]      # every 5 min
+  workflow_dispatch:
 
 env:
-  CF_ACCOUNT:  ${{ secrets.CF_ACCOUNT_ID }}   # ← created in repo Secrets
-  CF_LIST:     ${{ secrets.CF_LIST_ID }}      # ← created in repo Secrets
-  CF_TOKEN:    ${{ secrets.CF_TOKEN }}        # ← created in repo Secrets
+  CF_ACCOUNT:  ${{ secrets.CF_ACCOUNT_ID }}  # set in repo › Settings › Secrets
+  CF_LIST:     ${{ secrets.CF_LIST_ID }}
+  CF_TOKEN:    ${{ secrets.CF_TOKEN }}
 
-  GIST_ID:     YOUR_32_CHARACTER_GIST_ID      # ← paste from browser URL
-  GIST_FILE:   ips.txt                        # filename inside the gist
-  GIST_TOKEN:  ${{ secrets.GIST_TOKEN }}      # ← PAT (Read & write gists)
+  GIST_ID:     YOUR_32_CHAR_GIST_ID          # paste from gist URL
+  GIST_FILE:   ips.txt                       # file inside the gist
+  GIST_TOKEN:  ${{ secrets.GIST_TOKEN }}     # PAT made in SAME account as gist
 
 jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
-      # 1 ▸ pull the IPs from your Cloudflare list
-      - name: Fetch list
-        run: |
-          curl -sS -H "Authorization: Bearer $CF_TOKEN" \
-               "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/rules/lists/$CF_LIST/items" \
-            | jq -r '.result[].value' | sort -u > list.txt
+    - name: Fetch list from Cloudflare
+      id: pull
+      run: |
+        set -e
+        echo "▶ Calling Cloudflare list API"
+        RESP=$(curl -s -H "Authorization: Bearer $CF_TOKEN" \
+          "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/rules/lists/$CF_LIST/items")
+        echo "$RESP" | jq -e '.success == true' >/dev/null || {
+          echo "::error ::Cloudflare API call failed → check Account-ID, List-ID, or Token"
+          echo "$RESP"
+          exit 1
+        }
+        echo "$RESP" | jq -r '.result[].value' | sort -u > list.txt
+        if [ ! -s list.txt ]; then
+          echo "::warning ::Cloudflare list is empty – skipping gist update"
+          exit 0        # do NOT wipe the gist
+        fi
+        echo "✓ Pulled $(wc -l < list.txt) items"
 
-          # abort if Cloudflare returned nothing
-          if [ ! -s list.txt ]; then
-            echo "Cloudflare list empty – skipping gist update"
-            exit 0
-          fi
-
-      # 2 ▸ write those IPs into ips.txt inside the gist
-      - name: Update gist
-        run: |
-          jq -n \
-            --arg f "$GIST_FILE" \
-            --arg c "$(tr '\n' '\\n' < list.txt)" \
-            '{files:{($f):{content:$c}}}' > body.json
-
-          curl -sS -XPATCH \
-               -H "Authorization: token $GIST_TOKEN" \
-               -H "Content-Type: application/json" \
-               -d @body.json \
-               "https://api.github.com/gists/$GIST_ID"
+    - name: Update / create ips.txt in the gist
+      run: |
+        jq -n --arg f "$GIST_FILE" --arg c "$(tr '\n' '\\n' < list.txt)" \
+          '{files:{($f):{content:$c}}}' > body.json
+        echo "▶ PATCH /gists/$GIST_ID"
+        HTTP=$(curl -s -o /tmp/resp.json -w "%{http_code}" -XPATCH \
+          -H "Authorization: token $GIST_TOKEN" \
+          -H "Content-Type: application/json" \
+          -d @body.json "https://api.github.com/gists/$GIST_ID")
+        if [ "$HTTP" != "200" ]; then
+          echo "::error ::GitHub returned $HTTP – wrong GIST_ID or PAT not authorised"
+          cat /tmp/resp.json
+          exit 1
+        fi
+        echo "✓ Gist updated"
