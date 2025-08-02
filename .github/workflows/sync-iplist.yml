@@ -10,7 +10,7 @@ env:
   CF_LIST:     ${{ secrets.CF_LIST_ID }}
   CF_TOKEN:    ${{ secrets.CF_TOKEN }}
 
-  GIST_ID:     d01cec2c0d4fe6e8e203d9ca9723b69c   # ← replace with *your* gist ID
+  GIST_ID:     eb732092f58eaeb1291e2acf0b1317f1   # ← replace with *your* gist ID
   GIST_FILE:   ips.txt
   GIST_TOKEN:  ${{ secrets.GIST_TOKEN }}
 
